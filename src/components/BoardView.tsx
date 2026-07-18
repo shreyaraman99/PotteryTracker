@@ -2,12 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import type { Category, PotteryItem, SortOption } from "@/lib/types"
-import { db, getCategories, getItemsByCategory } from "@/lib/db"
+import { getCategories, getItems, createItem, updateItem, updateCategory, deleteCategory, addHistoryEntry } from "@/lib/api"
 import ItemDetailView from "./ItemDetailView"
 import CategoryEditView from "./CategoryEditView"
-import { ChevronRight, PlusIcon, SortIcon, PencilIcon } from "./icons"
+import { ChevronRight, PlusIcon, SortArrows, PencilIcon } from "./icons"
 
-export default function BoardView() {
+export default function BoardView({ isActive }: { isActive?: boolean }) {
   const [categories, setCategories] = useState<Category[]>([])
   const [itemsByCategory, setItemsByCategory] = useState<Record<string, PotteryItem[]>>({})
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
@@ -20,14 +20,13 @@ export default function BoardView() {
   const [newItemCategory, setNewItemCategory] = useState<Category | null>(null)
   const [newItemName, setNewItemName] = useState("")
   const [showNewItemPrompt, setShowNewItemPrompt] = useState(false)
-  const [sortDropdown, setSortDropdown] = useState<Set<string>>(new Set())
 
   const loadData = useCallback(async () => {
     const cats = await getCategories()
     setCategories(cats)
     const map: Record<string, PotteryItem[]> = {}
     for (const cat of cats) {
-      const items = await getItemsByCategory(cat.id!)
+      const items = await getItems(cat.id)
       map[cat.id!] = items
     }
     setItemsByCategory(map)
@@ -36,6 +35,10 @@ export default function BoardView() {
   useEffect(() => {
     loadData()
   }, [loadData])
+
+  useEffect(() => {
+    if (isActive) loadData()
+  }, [isActive])
 
   const toggleCollapse = (id: string) => {
     setCollapsed((prev) => {
@@ -65,21 +68,14 @@ export default function BoardView() {
   const createNewItem = async () => {
     if (!newItemCategory) return
     const name = newItemName.trim() || "New Piece"
-    const item: PotteryItem = {
-      id: crypto.randomUUID(),
+    const now = Date.now()
+    const item = await createItem({
       name,
-      timestamp: Date.now(),
-      lastEdited: Date.now(),
+      timestamp: now,
+      lastEdited: now,
       categoryId: newItemCategory.id!,
-      notes: "",
-    }
-    await db.items.add(item)
-    await db.history.add({
-      id: crypto.randomUUID(),
-      itemId: item.id!,
-      timestamp: Date.now(),
-      message: "Created",
     })
+    await addHistoryEntry({ itemId: item.id!, timestamp: now, message: "Created" })
     setCollapsed((prev) => {
       const next = new Set(prev)
       next.delete(newItemCategory.id!)
@@ -90,40 +86,22 @@ export default function BoardView() {
     loadData()
   }
 
-  const moveItem = async (itemId: string, toCategoryId: string) => {
-    const item = await db.items.get(itemId)
-    if (!item || item.categoryId === toCategoryId) return
-    const oldCat = categories.find((c) => c.id === item.categoryId)
-    const newCat = categories.find((c) => c.id === toCategoryId)
-    await db.items.update(itemId, { categoryId: toCategoryId, lastEdited: Date.now() })
-    await db.history.add({
-      id: crypto.randomUUID(),
-      itemId,
-      timestamp: Date.now(),
-      message: `Moved from ${oldCat?.name ?? "Unknown"} to ${newCat?.name ?? "Unknown"}`,
-    })
-    loadData()
-  }
-
-  const handleMoveCategory = async (catId: string, newOrder: number) => {
-    await db.categories.update(catId, { order: newOrder })
-    loadData()
-  }
-
   const moveCategoryUp = (cat: Category) => {
     if (cat.order === 0) return
     const above = categories.find((c) => c.order === cat.order - 1)
     if (!above) return
-    handleMoveCategory(cat.id!, above.order)
-    handleMoveCategory(above.id!, cat.order)
+    updateCategory(cat.id!, { order: above.order })
+    updateCategory(above.id!, { order: cat.order })
+    loadData()
   }
 
   const moveCategoryDown = (cat: Category) => {
     if (cat.order === categories.length - 1) return
     const below = categories.find((c) => c.order === cat.order + 1)
     if (!below) return
-    handleMoveCategory(cat.id!, below.order)
-    handleMoveCategory(below.id!, cat.order)
+    updateCategory(cat.id!, { order: below.order })
+    updateCategory(below.id!, { order: cat.order })
+    loadData()
   }
 
   const filteredItems = useMemo(() => {
@@ -228,58 +206,22 @@ export default function BoardView() {
                   </button>
                 ) : (
                   <>
-                    <div className="relative">
-                      <button
-                        onClick={() => {
-                          setSortDropdown((prev) => {
-                            const next = new Set(prev)
-                            if (next.has(cat.id!)) next.delete(cat.id!)
-                            else next.add(cat.id!)
-                            return next
-                          })
-                        }}
-                        className="p-1.5 text-zinc-500 hover:text-zinc-700"
-                      >
-                        <SortIcon />
-                      </button>
-                      {sortDropdown.has(cat.id!) && (
-                        <>
-                          <div
-                            className="fixed inset-0 z-10"
-                            onClick={() => setSortDropdown(new Set())}
-                          />
-                          <div className="absolute right-0 top-full mt-1 z-20">
-                            <div className="bg-white border border-zinc-200 rounded-lg shadow-lg py-1 min-w-36">
-                              {(["recentlyEdited", "alphabetical"] as SortOption[]).map(
-                                (opt) => (
-                                  <button
-                                    key={opt}
-                                    onClick={async () => {
-                                      await db.categories.update(cat.id!, {
-                                        sortOption: opt,
-                                      })
-                                      setSortDropdown(new Set())
-                                      loadData()
-                                    }}
-                                    className="flex items-center justify-between w-full px-3 py-2.5 text-sm hover:bg-zinc-50"
-                                  >
-                                    <span>{opt === "alphabetical" ? "A-Z" : "Recent"}</span>
-                                    {cat.sortOption === opt && (
-                                      <span className="text-blue-600">✓</span>
-                                    )}
-                                  </button>
-                                )
-                              )}
-                            </div>
-                          </div>
-                        </>
-                      )}
-                    </div>
                     <button
                       onClick={() => handleAddItem(cat)}
                       className="p-1.5 text-blue-600 hover:text-blue-800"
                     >
                       <PlusIcon />
+                    </button>
+                    <button
+                      onClick={async () => {
+                        const next = cat.sortOption === "alphabetical" ? "recentlyEdited" : "alphabetical"
+                        await updateCategory(cat.id!, { sortOption: next })
+                        loadData()
+                      }}
+                      className="flex items-center gap-0.5 text-zinc-500 hover:text-zinc-700 text-xs"
+                      title={`Sort: ${cat.sortOption === "alphabetical" ? "A-Z" : "Recent"}`}
+                    >
+                      <SortArrows />
                     </button>
                   </>
                 )}

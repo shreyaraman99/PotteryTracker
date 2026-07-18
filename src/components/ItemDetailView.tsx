@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { Category, HistoryEntry, PotteryItem, PotteryPhoto } from "@/lib/types"
-import { db } from "@/lib/db"
-import { PencilIcon } from "./icons"
+import { updateItem, getHistory, addHistoryEntry, deleteHistoryEntry, getPhotos, addPhoto, deletePhoto } from "@/lib/api"
 
 export default function ItemDetailView({
   item,
@@ -26,9 +25,11 @@ export default function ItemDetailView({
   const [deleteConfirm, setDeleteConfirm] = useState(false)
 
   const loadData = useCallback(async () => {
-    const h = await db.history.where("itemId").equals(item.id!).reverse().sortBy("timestamp")
+    const [h, p] = await Promise.all([
+      getHistory(item.id!),
+      getPhotos(item.id!),
+    ])
     setHistory(h)
-    const p = await db.photos.where("itemId").equals(item.id!).reverse().sortBy("timestamp")
     setPhotos(p)
   }, [item.id])
 
@@ -37,12 +38,10 @@ export default function ItemDetailView({
   }, [loadData])
 
   const save = async () => {
-    await db.items.update(item.id!, { name, notes, categoryId, lastEdited: Date.now() })
+    await updateItem(item.id!, { name, notes, categoryId, lastEdited: Date.now() })
     if (categoryId !== item.categoryId) {
-      const oldCat = categories.find((c) => c.id === item.categoryId)
       const newCat = categories.find((c) => c.id === categoryId)
-      await db.history.add({
-        id: crypto.randomUUID(),
+      await addHistoryEntry({
         itemId: item.id!,
         timestamp: Date.now(),
         message: `Moved to ${newCat?.name ?? "Unknown"}`,
@@ -57,30 +56,22 @@ export default function ItemDetailView({
     const reader = new FileReader()
     reader.onload = async () => {
       const dataUrl = reader.result as string
-      await db.photos.add({
-        id: crypto.randomUUID(),
-        itemId: item.id!,
-        timestamp: Date.now(),
-        imageData: dataUrl,
-      })
-      await db.items.update(item.id!, { lastEdited: Date.now() })
+      await addPhoto({ itemId: item.id!, timestamp: Date.now(), imageData: dataUrl })
+      await updateItem(item.id!, { lastEdited: Date.now() })
       loadData()
     }
     reader.readAsDataURL(file)
   }
 
-  const deletePhoto = async (photo: PotteryPhoto) => {
-    await db.photos.delete(photo.id!)
-    await db.items.update(item.id!, { lastEdited: Date.now() })
+  const deletePhotoEntry = async (photo: PotteryPhoto) => {
+    await deletePhoto(photo.id!)
+    await updateItem(item.id!, { lastEdited: Date.now() })
     loadData()
   }
 
   const deleteItem = async () => {
-    const itemPhotos = await db.photos.where("itemId").equals(item.id!).toArray()
-    for (const p of itemPhotos) await db.photos.delete(p.id!)
-    const itemHistory = await db.history.where("itemId").equals(item.id!).toArray()
-    for (const h of itemHistory) await db.history.delete(h.id!)
-    await db.items.delete(item.id!)
+    const { deleteItem: delItem } = await import("@/lib/api")
+    await delItem(item.id!)
     onSaved()
   }
 
@@ -137,7 +128,7 @@ export default function ItemDetailView({
                     onClick={() => setSelectedPhoto(photo)}
                   />
                   <button
-                    onClick={() => deletePhoto(photo)}
+                    onClick={() => deletePhotoEntry(photo)}
                     className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-black/50 text-white flex items-center justify-center text-xs"
                   >
                     ✕
@@ -184,7 +175,7 @@ export default function ItemDetailView({
                   </div>
                   <button
                     onClick={async () => {
-                      await db.history.delete(entry.id!)
+                      await deleteHistoryEntry(entry.id!)
                       loadData()
                     }}
                     className="text-zinc-400 hover:text-red-500 text-xs"

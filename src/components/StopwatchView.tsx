@@ -1,7 +1,12 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
-import { db } from "@/lib/db"
+import { useEffect, useRef, useState } from "react"
+import { addTimeLog } from "@/lib/api"
+
+function localDate() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
 
 function formatTime(t: number) {
   const minutes = Math.floor(t / 60)
@@ -66,12 +71,8 @@ export default function StopwatchView() {
     setDisplayTime(newAccumulated)
     localStorage.setItem("stopwatch_accumulated", String(newAccumulated))
 
-    const today = new Date().toISOString().split("T")[0]
-    await db.timeLogs.add({
-      id: crypto.randomUUID(),
-      date: today,
-      duration: sessionDuration,
-    })
+    const today = localDate()
+    await addTimeLog({ date: today, duration: sessionDuration })
   }
 
   const reset = () => {
@@ -94,8 +95,8 @@ export default function StopwatchView() {
 
   return (
     <div className="flex flex-col h-full bg-black text-white">
-      <div className="flex-1 flex flex-col items-center justify-center">
-        <div className="text-[4rem] font-thin tabular-nums tracking-tight leading-none mb-8" style={{ fontVariantNumeric: "tabular-nums" }}>
+      <div className="flex-[1] flex flex-col items-center justify-end pb-16">
+        <div className="text-[5.5rem] font-thin tabular-nums tracking-tight leading-none mb-10" style={{ fontVariantNumeric: "tabular-nums" }}>
           {formatTime(displayTime)}
         </div>
 

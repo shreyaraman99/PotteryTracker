@@ -93,23 +93,20 @@ export function PlusIcon() {
   )
 }
 
-export function SortIcon() {
+export function SortArrows() {
   return (
     <svg
-      width="16"
-      height="16"
+      width="14"
+      height="14"
       viewBox="0 0 24 24"
       fill="none"
-      stroke="#71717a"
-      strokeWidth="2"
+      stroke="currentColor"
+      strokeWidth="2.5"
       strokeLinecap="round"
       strokeLinejoin="round"
     >
-      <path d="M11 5h10" />
-      <path d="M11 9h7" />
-      <path d="M11 13h4" />
-      <path d="M3 17l3 3 3-3" />
-      <path d="M6 14v6" />
+      <path d="M8 3l-4 4h8" />
+      <path d="M16 21l4-4h-8" />
     </svg>
   )
 }

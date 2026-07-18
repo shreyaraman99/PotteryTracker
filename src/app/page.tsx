@@ -1,11 +1,11 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useEffect, useState } from "react"
 import { TabBar } from "@/components/TabBar"
 import BoardView from "@/components/BoardView"
 import StopwatchView from "@/components/StopwatchView"
 import CalendarView from "@/components/CalendarView"
-import { ensureDefaultCategories } from "@/lib/db"
+import { initDB } from "@/lib/api"
 
 type Tab = "board" | "stopwatch" | "calendar"
 
@@ -14,27 +14,25 @@ export default function Home() {
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
-    ensureDefaultCategories().then(() => setReady(true))
+    initDB().then(() => setReady(true)).catch(() => setReady(true))
   }, [])
 
-  const renderTab = useCallback(() => {
-    if (!ready) return <div className="flex-1 flex items-center justify-center text-zinc-400">Loading...</div>
-    switch (activeTab) {
-      case "board":
-        return <BoardView />
-      case "stopwatch":
-        return <StopwatchView />
-      case "calendar":
-        return <CalendarView />
-    }
-  }, [activeTab, ready])
+  if (!ready) return <div className="h-dvh flex items-center justify-center text-zinc-400">Loading...</div>
 
   return (
-    <>
-      <div className="flex-1 overflow-hidden">
-        {renderTab()}
+    <div className="flex-1 flex flex-col min-h-0">
+      <div className="flex-1 overflow-hidden relative">
+        <div className={`absolute inset-0 ${activeTab === "board" ? "" : "hidden"}`}>
+          <BoardView isActive={activeTab === "board"} />
+        </div>
+        <div className={`absolute inset-0 ${activeTab === "stopwatch" ? "" : "hidden"}`}>
+          <StopwatchView />
+        </div>
+        <div className={`absolute inset-0 ${activeTab === "calendar" ? "" : "hidden"}`}>
+          <CalendarView isActive={activeTab === "calendar"} />
+        </div>
       </div>
       <TabBar activeTab={activeTab} onTabChange={setActiveTab} />
-    </>
+    </div>
   )
 }

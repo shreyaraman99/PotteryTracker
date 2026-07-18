@@ -12,8 +12,8 @@ export function TabBar({
   onTabChange: (tab: Tab) => void
 }) {
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-zinc-200 bg-white">
-      <div className="mx-auto flex max-w-lg items-center justify-around py-1">
+    <nav className="border-t border-zinc-200 bg-white pb-[env(safe-area-inset-bottom,8px)]">
+      <div className="mx-auto flex max-w-lg items-center justify-around py-2">
         {(
           [
             { id: "board" as const, label: "Board", Icon: BoardIcon },

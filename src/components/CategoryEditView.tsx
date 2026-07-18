@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import type { Category } from "@/lib/types"
-import { db } from "@/lib/db"
+import { getCategories, createCategory, updateCategory, deleteCategory } from "@/lib/api"
 
 const presetColors = [
   { name: "Blue", hex: "#007AFF" },
@@ -32,27 +32,17 @@ export default function CategoryEditView({
   const save = async () => {
     if (!name.trim()) return
     if (isNew) {
-      const all = await db.categories.orderBy("order").toArray()
-      await db.categories.add({
-        id: crypto.randomUUID(),
-        name: name.trim(),
-        order: all.length,
-        colorHex,
-        sortOption: "recentlyEdited",
-      })
+      const all = await getCategories()
+      await createCategory({ name: name.trim(), order: all.length, colorHex })
     } else {
-      await db.categories.update(category!.id!, { name: name.trim(), colorHex })
+      await updateCategory(category!.id!, { name: name.trim(), colorHex })
     }
     onSaved()
   }
 
   const deleteCat = async () => {
     if (!category?.id) return
-    const items = await db.items.where("categoryId").equals(category.id).toArray()
-    for (const item of items) {
-      await db.items.update(item.id!, { categoryId: "orphaned" })
-    }
-    await db.categories.delete(category.id)
+    await deleteCategory(category.id)
     onSaved()
   }
 

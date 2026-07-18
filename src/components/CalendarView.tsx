@@ -1,13 +1,14 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { db, getTotalTimeForDate } from "@/lib/db"
-import type { TimeLog } from "@/lib/types"
+import { getTimeLogsForMonth, getTimeLogs, addTimeLog, deleteTimeLog } from "@/lib/api"
 
 const WEEKDAYS = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]
+const FULL_DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
 
 function formatDuration(t: number) {
+  t = Math.round(t / 60) * 60
   const hours = Math.floor(t / 3600)
   const minutes = Math.floor((t % 3600) / 60)
   if (hours > 0) return `${hours}h ${minutes}m`
@@ -15,6 +16,7 @@ function formatDuration(t: number) {
 }
 
 function formatHoursOnly(t: number) {
+  t = Math.round(t / 60) * 60
   const hours = Math.floor(t / 3600)
   const minutes = Math.floor((t % 3600) / 60)
   return `${hours}h ${minutes}m`
@@ -40,7 +42,7 @@ function isFuture(year: number, month: number, day: number) {
   return date > today
 }
 
-export default function CalendarView() {
+export default function CalendarView({ isActive }: { isActive?: boolean }) {
   const now = new Date()
   const [year, setYear] = useState(now.getFullYear())
   const [month, setMonth] = useState(now.getMonth())
@@ -50,12 +52,10 @@ export default function CalendarView() {
   const [showTimeEntry, setShowTimeEntry] = useState(false)
 
   const loadMonthData = useCallback(async () => {
-    const days = getDaysInMonth(year, month)
+    const logs = await getTimeLogsForMonth(year, month)
     const map: Record<string, number> = {}
-    for (let d = 1; d <= days; d++) {
-      const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`
-      const total = await getTotalTimeForDate(dateStr)
-      if (total > 0) map[dateStr] = total
+    for (const log of logs) {
+      map[log.date] = (map[log.date] ?? 0) + log.duration
     }
     setTimeData(map)
   }, [year, month])
@@ -64,12 +64,56 @@ export default function CalendarView() {
     loadMonthData()
   }, [loadMonthData])
 
+  useEffect(() => {
+    if (isActive) loadMonthData()
+  }, [isActive])
+
   const monthlyTotal = useMemo(() => {
     return Object.values(timeData).reduce((s, v) => s + v, 0)
   }, [timeData])
 
   const sessionDays = useMemo(() => {
     return Object.keys(timeData).length
+  }, [timeData])
+
+  const avgPerSession = useMemo(() => {
+    if (sessionDays === 0) return 0
+    return monthlyTotal / sessionDays
+  }, [monthlyTotal, sessionDays])
+
+  const longestSession = useMemo(() => {
+    const vals = Object.values(timeData)
+    return vals.length > 0 ? Math.max(...vals) : 0
+  }, [timeData])
+
+  const longestStreak = useMemo(() => {
+    const dates = Object.keys(timeData).sort()
+    if (dates.length === 0) return 0
+    let maxStreak = 1
+    let current = 1
+    for (let i = 1; i < dates.length; i++) {
+      const prev = new Date(dates[i - 1])
+      const curr = new Date(dates[i])
+      const diff = (curr.getTime() - prev.getTime()) / (1000 * 60 * 60 * 24)
+      if (diff === 1) {
+        current++
+        maxStreak = Math.max(maxStreak, current)
+      } else {
+        current = 1
+      }
+    }
+    return maxStreak
+  }, [timeData])
+
+  const busiestDay = useMemo(() => {
+    const dayTotals = [0, 0, 0, 0, 0, 0, 0]
+    for (const [dateStr, total] of Object.entries(timeData)) {
+      const day = new Date(dateStr + "T12:00:00").getDay()
+      dayTotals[day] += total
+    }
+    const max = Math.max(...dayTotals)
+    if (max === 0) return ""
+    return FULL_DAYS[dayTotals.indexOf(max)]
   }, [timeData])
 
   const changeMonth = (delta: number) => {
@@ -97,62 +141,52 @@ export default function CalendarView() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="bg-white border-b border-zinc-200 px-4 pt-3 pb-2">
-        <div className="flex items-center justify-between mb-2">
-          <button onClick={() => changeMonth(-1)} className="p-2 text-blue-600 font-bold">
-            ←
-          </button>
+      <div className="bg-white border-b border-zinc-200 px-4 pt-8 pb-1">
+        <div className="flex items-center justify-between mb-1 relative">
+          <div className="flex items-center gap-2">
+            <button onClick={() => changeMonth(-1)} className="p-1.5 text-blue-600 font-bold text-sm">
+              ←
+            </button>
+          </div>
           <button
             onClick={() => setShowMonthPicker(true)}
-            className="flex items-center gap-1"
+            className="flex items-center gap-1 absolute left-1/2 -translate-x-1/2"
           >
-            <span className="text-lg font-bold">{MONTHS[month]} {year}</span>
-            <span className="text-zinc-400 text-sm">▼</span>
+            <span className="text-base font-bold">{MONTHS[month]} {year}</span>
+            <span className="text-zinc-500 text-xs">▼</span>
           </button>
-          <button onClick={() => changeMonth(1)} className="p-2 text-blue-600 font-bold">
-            →
-          </button>
-        </div>
-
-        <div className="flex items-center justify-between px-1 mb-3">
-          <div>
-            <p className="text-[10px] text-zinc-500 font-semibold uppercase">Total Time</p>
-            <p className="text-sm font-bold">{formatHoursOnly(monthlyTotal)}</p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                const today = new Date()
+                setMonth(today.getMonth())
+                setYear(today.getFullYear())
+              }}
+              className="text-xs text-blue-600 font-medium"
+            >
+              Today
+            </button>
+            <button onClick={() => changeMonth(1)} className="p-1.5 text-blue-600 font-bold text-sm">
+              →
+            </button>
           </div>
-          <div className="text-right">
-            <p className="text-[10px] text-zinc-500 font-semibold uppercase">Sessions</p>
-            <p className="text-sm font-bold">{sessionDays} days</p>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between">
-          <button
-            onClick={() => {
-              const today = new Date()
-              setMonth(today.getMonth())
-              setYear(today.getFullYear())
-            }}
-            className="text-sm text-zinc-500 font-medium"
-          >
-            Today
-          </button>
         </div>
       </div>
 
       <div className="bg-white border-b border-zinc-200">
         <div className="flex">
           {WEEKDAYS.map((d) => (
-            <div key={d} className="flex-1 text-center text-[10px] font-bold text-zinc-500 py-2">
+            <div key={d} className="flex-1 text-center text-[10px] font-bold text-zinc-500 py-1.5">
               {d}
             </div>
           ))}
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto bg-white">
-        <div className="grid grid-cols-7">
+      <div className="flex-1 overflow-y-auto bg-white min-h-0">
+        <div className="grid grid-cols-7 auto-rows-[minmax(0,85px)]">
           {Array.from({ length: firstDay }).map((_, i) => (
-            <div key={`empty-${i}`} className="aspect-[1/1.2] border-b border-r border-zinc-100" />
+            <div key={`empty-${i}`} className="" />
           ))}
           {Array.from({ length: days }).map((_, i) => {
             const day = i + 1
@@ -160,15 +194,20 @@ export default function CalendarView() {
             const total = timeData[dateStr] ?? 0
             const today = isToday(year, month, day)
             const future = isFuture(year, month, day)
+            const cellIndex = firstDay + day - 1
+            const col = cellIndex % 7
+            const row = Math.floor(cellIndex / 7)
 
             return (
               <button
                 key={day}
                 onClick={() => !future && handleDayClick(day)}
                 disabled={future}
-                className={`aspect-[1/1.2] border-b border-r border-zinc-100 flex flex-col items-start p-1 relative ${
+                className={`border-b border-r border-zinc-100 flex flex-col items-start p-1 relative ${
                   future ? "opacity-30" : ""
-                } ${total > 0 ? "bg-green-50" : ""} ${today ? "bg-blue-50" : ""}`}
+                } ${total > 0 ? "bg-green-50" : ""} ${today ? "bg-blue-50" : ""} ${
+                  col === 0 || (day === 1 && firstDay > 0) ? "border-l" : ""
+                } ${row === 0 || (row === 1 && col < firstDay) ? "border-t" : ""}`}
               >
                 <span
                   className={`text-xs font-bold ${
@@ -178,13 +217,45 @@ export default function CalendarView() {
                   {day}
                 </span>
                 {total > 0 && (
-                  <span className="text-[11px] font-bold text-green-600 absolute bottom-1 left-0 right-0 text-center leading-none">
+                  <span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-green-600 leading-tight pointer-events-none">
                     {formatDuration(total)}
                   </span>
                 )}
               </button>
             )
           })}
+          {Array.from({ length: Math.ceil((firstDay + days) / 7) * 7 - firstDay - days }).map((_, i) => (
+            <div key={`trailing-${i}`} className="" />
+          ))}
+        </div>
+
+        <div className="border-t border-zinc-200 px-6 py-4">
+          <div className="grid grid-cols-2 gap-x-8 gap-y-4 text-center">
+            <div>
+              <p className="text-xs text-zinc-500 font-semibold uppercase tracking-wider">Total Time</p>
+              <p className="text-sm font-bold">{formatHoursOnly(monthlyTotal)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-zinc-500 font-semibold uppercase tracking-wider">Sessions</p>
+              <p className="text-sm font-bold">{sessionDays} days</p>
+            </div>
+            <div>
+              <p className="text-xs text-zinc-500 font-semibold uppercase tracking-wider">Average Time</p>
+              <p className="text-sm font-bold">{sessionDays > 0 ? formatDuration(avgPerSession) : "—"}</p>
+            </div>
+            <div>
+              <p className="text-xs text-zinc-500 font-semibold uppercase tracking-wider">Longest Day</p>
+              <p className="text-sm font-bold">{longestSession > 0 ? formatDuration(longestSession) : "—"}</p>
+            </div>
+            <div>
+              <p className="text-xs text-zinc-500 font-semibold uppercase tracking-wider">Longest Streak</p>
+              <p className="text-sm font-bold">{longestStreak > 0 ? `${longestStreak} days` : "—"}</p>
+            </div>
+            <div>
+              <p className="text-xs text-zinc-500 font-semibold uppercase tracking-wider">Busiest Day</p>
+              <p className="text-sm font-bold">{busiestDay || "—"}</p>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -236,8 +307,8 @@ function MonthPicker({
   const years = Array.from({ length: 21 }, (_, i) => 2020 + i)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40">
-      <div className="w-full max-w-sm bg-white rounded-t-2xl p-6">
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40">
+      <div className="w-full max-w-sm bg-white rounded-t-2xl p-6 pb-12">
         <h2 className="text-lg font-bold text-center mb-4">Select Month</h2>
         <div className="flex gap-4 mb-6">
           <select
@@ -298,22 +369,18 @@ function ManualTimeEntry({
   }, [existingTime])
 
   const save = async () => {
-    const existing = await db.timeLogs.where("date").equals(dateStr).toArray()
-    for (const log of existing) await db.timeLogs.delete(log.id!)
+    const existing = await getTimeLogs(dateStr)
+    for (const log of existing) await deleteTimeLog(log.id!)
     const totalSeconds = hours * 3600 + minutes * 60
     if (totalSeconds > 0) {
-      await db.timeLogs.add({
-        id: crypto.randomUUID(),
-        date: dateStr,
-        duration: totalSeconds,
-      })
+      await addTimeLog({ date: dateStr, duration: totalSeconds })
     }
     onSaved()
   }
 
   const clearEntry = async () => {
-    const existing = await db.timeLogs.where("date").equals(dateStr).toArray()
-    for (const log of existing) await db.timeLogs.delete(log.id!)
+    const existing = await getTimeLogs(dateStr)
+    for (const log of existing) await deleteTimeLog(log.id!)
     onSaved()
   }
 
@@ -325,8 +392,8 @@ function ManualTimeEntry({
   })
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40">
-      <div className="w-full max-w-sm bg-white rounded-t-2xl p-6">
+    <div className="fixed inset-0 z-[60] flex items-end justify-center bg-black/40">
+      <div className="w-full max-w-sm bg-white rounded-t-2xl p-6 pb-12">
         <h2 className="text-lg font-bold text-center mb-1">Log Time</h2>
         <p className="text-sm text-zinc-500 text-center mb-6">{formatted}</p>
 
